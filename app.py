@@ -363,8 +363,14 @@ def webhook_tasks():
             return jsonify({"status": "ok", "message": "No task ID"}), 200
         
         # Get auth token from webhook
+        # Bitrix24 предоставляет access_token или application_token в auth
         auth_data = webhook_data.get("auth", {})
-        auth_token = auth_data.get("application_token", Config.BITRIX24_AUTH_TOKEN)
+        # Используем access_token если есть, иначе application_token, иначе токен из конфига
+        auth_token = (
+            auth_data.get("access_token") or 
+            auth_data.get("application_token") or 
+            Config.BITRIX24_AUTH_TOKEN
+        )
         
         # Get full task data from Bitrix24 REST API
         import sys
