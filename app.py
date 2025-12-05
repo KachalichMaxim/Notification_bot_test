@@ -292,11 +292,20 @@ def webhook_tasks():
         task_data = extract_task_data(webhook_data)
         if not task_data:
             print("⚠️ No task data found in webhook")
+            import sys
+            sys.stderr.write("⚠️ No task data found in webhook\n")
             return jsonify({"status": "ok", "message": "No task data"}), 200
         
         task_id = task_data.get("id")
         creator_id = task_data.get("creator_id")
         responsible_id = task_data.get("responsible_id")
+        
+        # Логируем в stderr для отладки
+        import sys
+        sys.stderr.write(f"\n🔍 Task ID: {task_id}\n")
+        sys.stderr.write(f"🔍 Creator ID: {creator_id}\n")
+        sys.stderr.write(f"🔍 Responsible ID: {responsible_id}\n")
+        sys.stderr.write(f"🔍 Task data: {json.dumps(task_data, indent=2, ensure_ascii=False)}\n")
         
         if Config.DEBUG:
             print(f"\n🔍 Task ID: {task_id}")
@@ -310,19 +319,21 @@ def webhook_tasks():
             # Fallback to direct data structure
             task_fields = webhook_data.get("data", {})
         
+        sys.stderr.write(f"🔍 Task fields for filtering: {json.dumps(task_fields, indent=2, ensure_ascii=False)}\n")
+        
         if not is_task_important(task_fields):
-            if Config.DEBUG:
-                print("⏭️ Task is not important - skipping")
+            msg = "⏭️ Task is not important - skipping"
+            print(msg)
+            sys.stderr.write(f"{msg}\n")
             return jsonify(
                 {"status": "ok", "message": "Task not important"}
             ), 200
 
         # Filter 2: Check if creator is a leader
         if not is_leader(creator_id):
-            if Config.DEBUG:
-                print(
-                    f"⏭️ Creator {creator_id} is not a leader - skipping"
-                )
+            msg = f"⏭️ Creator {creator_id} is not a leader - skipping"
+            print(msg)
+            sys.stderr.write(f"{msg}\n")
             return jsonify(
                 {"status": "ok", "message": "Creator not a leader"}
             ), 200
@@ -330,8 +341,9 @@ def webhook_tasks():
         # Filter 3: Check if task is urgent
         # Use task_fields from Filter 1
         if not is_task_urgent(task_fields):
-            if Config.DEBUG:
-                print("⏭️ Task is not urgent - skipping")
+            msg = "⏭️ Task is not urgent - skipping"
+            print(msg)
+            sys.stderr.write(f"{msg}\n")
             return jsonify(
                 {"status": "ok", "message": "Task not urgent"}
             ), 200
