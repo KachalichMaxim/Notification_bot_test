@@ -523,41 +523,49 @@ def webhook_tasks():
                 {"status": "ok", "message": "Task not urgent (priority < 2)"}
             ), 200
 
-        # Get Telegram chat ID for responsible user (Исполнитель)
-        # Уведомления отправляются ТОЛЬКО исполнителю задачи, а не всем
-        sys.stderr.write(
-            f"📤 Sending notification to RESPONSIBLE user (Исполнитель): {responsible_id}\n"
-        )
-        telegram_chat_id = get_telegram_chat_id(responsible_id)
-        if not telegram_chat_id:
-            msg = f"⚠️ No Telegram mapping found for responsible user {responsible_id}"
+        # Get list of subscribers (people who subscribed to bot)
+        subscribers = get_subscribers()
+        if not subscribers:
+            msg = "⚠️ No subscribers found in user_mappings.json"
             print(msg)
             sys.stderr.write(f"{msg}\n")
             return jsonify(
-                {"status": "ok", "message": "No Telegram mapping for responsible user"}
+                {"status": "ok", "message": "No subscribers configured"}
             ), 200
+        
+        sys.stderr.write(
+            f"📤 Sending notification to {len(subscribers)} subscriber(s): {subscribers}\n"
+        )
         
         # Determine event type (OnTaskAdd or OnTaskUpdate)
         event = webhook_data.get("event", "")
         event_type = "new" if "Add" in event else "updated"
 
-        # Send Telegram notification
-        success = send_task_notification(
-            telegram_chat_id, task_data, event_type
-        )
+        # Send Telegram notification to all subscribers
+        success_count = 0
+        failed_count = 0
+        
+        for chat_id in subscribers:
+            success = send_task_notification(chat_id, task_data, event_type)
+            if success:
+                success_count += 1
+                sys.stderr.write(f"✅ Notification sent to subscriber {chat_id}\n")
+            else:
+                failed_count += 1
+                sys.stderr.write(f"❌ Failed to send notification to subscriber {chat_id}\n")
 
-        if success:
+        if success_count > 0:
             print(
-                f"✅ Notification sent for task {task_id} "
-                f"to user {responsible_id}"
+                f"✅ Notifications sent for task {task_id}: "
+                f"{success_count} successful, {failed_count} failed"
             )
             return jsonify(
-                {"status": "ok", "message": "Notification sent"}
+                {"status": "ok", "message": f"Notifications sent to {success_count} subscriber(s)"}
             ), 200
         else:
-            print(f"❌ Failed to send notification for task {task_id}")
+            print(f"❌ Failed to send notifications for task {task_id} to all subscribers")
             return jsonify(
-                {"status": "error", "message": "Failed to send notification"}
+                {"status": "error", "message": "Failed to send notifications to all subscribers"}
             ), 500
 
     except Exception as e:

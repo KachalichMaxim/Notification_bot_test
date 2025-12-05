@@ -1,5 +1,8 @@
 {
-  "leaders": [],
-  "telegram_chats": {}
+  "leaders": [
+    "488"
+  ],
+  "telegram_chats": {
+    "488": "679865798"
+  }
 }
-
