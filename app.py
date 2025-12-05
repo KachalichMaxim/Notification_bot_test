@@ -199,8 +199,13 @@ def get_task_from_bitrix24(task_id: str, auth_data: Dict) -> Optional[Dict]:
 
 def is_task_urgent(task_data: Dict) -> bool:
     """Check if task is urgent based on priority or deadline"""
-    # Check priority
-    priority = task_data.get("PRIORITY", "")
+    # Check priority (поддерживаем разные форматы)
+    priority = (
+        task_data.get("PRIORITY") or 
+        task_data.get("priority") or 
+        task_data.get("Priority") or 
+        ""
+    )
     try:
         priority_int = int(priority) if priority else 0
         if priority_int >= Config.URGENT_PRIORITY_THRESHOLD:
@@ -212,8 +217,13 @@ def is_task_urgent(task_data: Dict) -> bool:
     except (ValueError, TypeError):
         pass
 
-    # Check deadline
-    deadline = task_data.get("DEADLINE", "")
+    # Check deadline (поддерживаем разные форматы)
+    deadline = (
+        task_data.get("DEADLINE") or 
+        task_data.get("deadline") or 
+        task_data.get("Deadline") or 
+        ""
+    )
     if deadline:
         try:
             # Try parsing various date formats
