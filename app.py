@@ -20,50 +20,28 @@ except ValueError as e:
 def is_task_important(task_data: Dict) -> bool:
     """Check if task has important status
     
-    Проверяет различные варианты полей (верхний/нижний регистр, camelCase)
+    Проверяет приоритет задачи: priority >= 2 (высокий или критический)
+    Также проверяет флаг isImportant, если доступен
     """
-    # Bitrix24 может возвращать поля в разных форматах:
-    # - Верхний регистр: STATUS, IMPORTANT
-    # - camelCase: status, important
-    # - REST API: status, important
-    
-    # Проверяем статус (разные варианты названий)
-    status = (
-        task_data.get("STATUS") or 
-        task_data.get("status") or 
-        task_data.get("Status") or 
+    # Основная проверка: ПРИОРИТЕТ >= 2
+    # Priority в Bitrix24: 1 = низкий, 2 = высокий, 3 = критический
+    priority = (
+        task_data.get("PRIORITY") or 
+        task_data.get("priority") or 
+        task_data.get("Priority") or 
         ""
     )
     
-    # Проверяем поле IMPORTANT (разные варианты)
-    important = (
-        task_data.get("IMPORTANT") or 
-        task_data.get("important") or 
-        task_data.get("Important") or 
-        ""
-    )
-    
-    # Проверяем STATUS_ID
-    status_id = (
-        task_data.get("STATUS_ID") or 
-        task_data.get("statusId") or 
-        task_data.get("status_id") or 
-        ""
-    )
-    
-    # Проверка статуса на наличие слова "important" или "важно"
-    if isinstance(status, str):
-        status_lower = status.lower()
-        if "important" in status_lower or "важно" in status_lower:
+    try:
+        priority_int = int(priority) if priority else 0
+        if priority_int >= 2:  # Высокий (2) или критический (3) приоритет
+            import sys
+            sys.stderr.write(f"✅ Task is important: priority = {priority_int}\n")
             return True
+    except (ValueError, TypeError):
+        pass
     
-    # Проверка поля IMPORTANT
-    if important:
-        important_str = str(important).lower()
-        if important_str in ["1", "true", "yes", "важно", "important", "y"]:
-            return True
-    
-    # Проверка поля isImportant (из REST API)
+    # Дополнительная проверка: флаг isImportant (если доступен)
     is_important = (
         task_data.get("isImportant") or 
         task_data.get("IS_IMPORTANT") or 
@@ -72,31 +50,18 @@ def is_task_important(task_data: Dict) -> bool:
     )
     if is_important:
         if isinstance(is_important, bool) and is_important:
+            import sys
+            sys.stderr.write(f"✅ Task is important: isImportant = True\n")
             return True
         important_str = str(is_important).lower()
         if important_str in ["1", "true", "yes", "важно", "important", "y"]:
+            import sys
+            sys.stderr.write(f"✅ Task is important: isImportant = {important_str}\n")
             return True
     
-    # Проверка STATUS_ID (статусы 2, 3 часто означают важные задачи)
-    if status_id:
-        if str(status_id) in ["2", "3"]:
-            return True
-    
-    # Если статус = 2 (выполняется) и приоритет высокий - считаем важной
-    if str(status) == "2" or str(status_id) == "2":
-        priority = (
-            task_data.get("PRIORITY") or 
-            task_data.get("priority") or 
-            task_data.get("Priority") or 
-            ""
-        )
-        try:
-            priority_int = int(priority) if priority else 0
-            if priority_int >= 2:  # Высокий или критический приоритет
-                return True
-        except (ValueError, TypeError):
-            pass
-    
+    # Если priority < 2, задача не важная
+    import sys
+    sys.stderr.write(f"⏭️ Task is not important: priority = {priority} (< 2)\n")
     return False
 
 
