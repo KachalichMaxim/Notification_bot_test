@@ -60,23 +60,21 @@ def send_task_notification(
         "creator_name", task_data.get("creator_id", "Неизвестен")
     )
 
-    # Event type text
-    event_text = (
-        "🆕 Новая задача" if event_type == "new" else "🔄 Задача обновлена"
-    )
+    # Format message according to requirements
+    # Срочная задача (red ! sign emoji)
+    urgent_emoji = "🔴"
     
-    # Build message
-    message = f"""{event_text}
+    # Get creator name (first and last name)
+    creator_name = task_data.get("creator_name", task_data.get("creator_id", "Неизвестен"))
+    
+    # Build message in required format
+    message = f"""{urgent_emoji} <b>Срочная задача</b>
 
-📋 <b>{task_data.get('title', 'Без названия')}</b>
+От: {creator_name}
 
-👤 Ответственный: {responsible_name}
-👨‍💼 Создатель: {creator_name}
-⚡ {priority_text}
-📅 {deadline_text}
-📊 Статус: {task_data.get('status', 'Не указан')}
+Наименование задачи: <b>{task_data.get('title', 'Без названия')}</b>
 
-🔗 <a href="{task_data.get('link', '#')}">Открыть задачу</a>
+Детальная информация по ссылке: <a href="{task_data.get('link', '#')}">Открыть задачу</a>
 """
     
     # Send message via Telegram Bot API
