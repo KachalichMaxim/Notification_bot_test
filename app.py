@@ -41,64 +41,115 @@ def is_task_important(task_data: Dict) -> bool:
     return False
 
 
-def get_task_from_bitrix24(task_id: str, auth_token: str) -> Optional[Dict]:
+def get_task_from_bitrix24(task_id: str, auth_data: Dict) -> Optional[Dict]:
     """Get full task data from Bitrix24 REST API
     
-    Использует метод tasks.task.get для получения полных данных задачи
+    Использует метод tasks.task.get для получения полных данных задачи.
+    Поддерживает два формата авторизации:
+    1. Входящий webhook: https://domain/rest/{user_id}/{token}/tasks.task.get
+    2. Исходящий webhook: https://domain/rest/tasks.task.get?auth=token
     """
-    if not task_id or not auth_token:
+    if not task_id:
         return None
     
     domain = Config.BITRIX24_DOMAIN.replace("https://", "").replace("http://", "")
     
-    # Исходящий webhook токен можно использовать для REST API
-    # Формат: https://domain/rest/tasks.task.get?auth=TOKEN
-    rest_url = f"https://{domain}/rest/tasks.task.get"
+    # Пробуем разные варианты авторизации
+    auth_methods = []
     
-    params = {
-        "auth": auth_token,
-        "taskId": task_id,
-        "select": [
-            "ID", "TITLE", "DESCRIPTION", "STATUS", "subStatus",
-            "DEADLINE", "CREATED_DATE", "RESPONSIBLE_ID", "CREATED_BY",
-            "PRIORITY", "MARK", "IMPORTANT"
-        ]
-    }
+    # Метод 1: Входящий webhook токен из конфига (формат: user_id/token)
+    if Config.BITRIX24_AUTH_TOKEN and "/" in Config.BITRIX24_AUTH_TOKEN:
+        parts = Config.BITRIX24_AUTH_TOKEN.split("/")
+        if len(parts) == 2:
+            user_id, token = parts
+            auth_methods.append({
+                "type": "incoming",
+                "url": f"https://{domain}/rest/{user_id}/{token}/tasks.task.get",
+                "params": {"taskId": task_id}
+            })
     
-    try:
-        response = requests.get(rest_url, params=params, timeout=10)
-        response.raise_for_status()
-        result = response.json()
-        
-        # Проверяем наличие ошибки
-        if result.get("error"):
+    # Метод 2: access_token из webhook (OAuth токен)
+    access_token = auth_data.get("access_token")
+    if access_token:
+        auth_methods.append({
+            "type": "oauth",
+            "url": f"https://{domain}/rest/tasks.task.get",
+            "params": {"auth": access_token, "taskId": task_id}
+        })
+    
+    # Метод 3: application_token из webhook
+    app_token = auth_data.get("application_token")
+    if app_token:
+        auth_methods.append({
+            "type": "app_token",
+            "url": f"https://{domain}/rest/tasks.task.get",
+            "params": {"auth": app_token, "taskId": task_id}
+        })
+    
+    # Метод 4: Токен из конфига (если не входящий)
+    if Config.BITRIX24_AUTH_TOKEN and "/" not in Config.BITRIX24_AUTH_TOKEN:
+        auth_methods.append({
+            "type": "config_token",
+            "url": f"https://{domain}/rest/tasks.task.get",
+            "params": {"auth": Config.BITRIX24_AUTH_TOKEN, "taskId": task_id}
+        })
+    
+    # Поля для выборки
+    select_fields = [
+        "ID", "TITLE", "DESCRIPTION", "STATUS", "subStatus",
+        "DEADLINE", "CREATED_DATE", "CREATED_BY", "RESPONSIBLE_ID",
+        "PRIORITY", "MARK", "IMPORTANT"
+    ]
+    
+    # Пробуем каждый метод авторизации
+    for method in auth_methods:
+        try:
+            params = method["params"].copy()
+            params["select"] = select_fields
+            
             import sys
-            sys.stderr.write(f"❌ Bitrix24 API error: {result.get('error_description', result.get('error'))}\n")
-            # Если исходящий токен не работает, попробуем входящий из конфига
-            if Config.BITRIX24_AUTH_TOKEN and Config.BITRIX24_AUTH_TOKEN != auth_token:
-                sys.stderr.write(f"🔄 Trying with config token...\n")
-                params["auth"] = Config.BITRIX24_AUTH_TOKEN
-                response = requests.get(rest_url, params=params, timeout=10)
-                response.raise_for_status()
-                result = response.json()
-        
-        if result.get("result") and result["result"].get("task"):
-            return result["result"]["task"]
-        
-        import sys
-        sys.stderr.write(f"⚠️ No task data in response: {json.dumps(result, indent=2, ensure_ascii=False)}\n")
-        return None
-    except Exception as e:
-        print(f"❌ Error fetching task from Bitrix24: {e}")
-        import sys
-        sys.stderr.write(f"❌ Error fetching task {task_id} from Bitrix24: {e}\n")
-        if hasattr(e, 'response') and e.response is not None:
-            try:
-                error_data = e.response.json()
-                sys.stderr.write(f"   Response: {json.dumps(error_data, indent=2, ensure_ascii=False)}\n")
-            except:
-                sys.stderr.write(f"   Response text: {e.response.text[:200]}\n")
-        return None
+            sys.stderr.write(f"🔄 Trying auth method: {method['type']}\n")
+            sys.stderr.write(f"   URL: {method['url']}\n")
+            
+            if method["type"] == "incoming":
+                # Для входящего webhook используем POST с JSON
+                response = requests.post(
+                    method["url"],
+                    json=params,
+                    headers={"Content-Type": "application/json"},
+                    timeout=10
+                )
+            else:
+                # Для остальных методов используем GET с параметрами
+                response = requests.get(method["url"], params=params, timeout=10)
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            # Проверяем наличие ошибки
+            if result.get("error"):
+                error_msg = result.get("error_description", result.get("error"))
+                sys.stderr.write(f"❌ Auth method {method['type']} failed: {error_msg}\n")
+                continue  # Пробуем следующий метод
+            
+            if result.get("result") and result["result"].get("task"):
+                sys.stderr.write(f"✅ Successfully fetched task using {method['type']}\n")
+                return result["result"]["task"]
+            
+        except Exception as e:
+            import sys
+            sys.stderr.write(f"❌ Error with auth method {method['type']}: {e}\n")
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    sys.stderr.write(f"   Response: {json.dumps(error_data, indent=2, ensure_ascii=False)}\n")
+                except:
+                    sys.stderr.write(f"   Response text: {e.response.text[:200]}\n")
+            continue  # Пробуем следующий метод
+    
+    import sys
+    sys.stderr.write(f"❌ All auth methods failed for task {task_id}\n")
+    return None
 
 
 def is_task_urgent(task_data: Dict) -> bool:
@@ -362,20 +413,14 @@ def webhook_tasks():
             sys.stderr.write("⚠️ No task ID found in webhook\n")
             return jsonify({"status": "ok", "message": "No task ID"}), 200
         
-        # Get auth token from webhook
-        # Bitrix24 предоставляет access_token или application_token в auth
+        # Get auth data from webhook
         auth_data = webhook_data.get("auth", {})
-        # Используем access_token если есть, иначе application_token, иначе токен из конфига
-        auth_token = (
-            auth_data.get("access_token") or 
-            auth_data.get("application_token") or 
-            Config.BITRIX24_AUTH_TOKEN
-        )
         
         # Get full task data from Bitrix24 REST API
         import sys
         sys.stderr.write(f"\n🔍 Fetching task {task_id} from Bitrix24...\n")
-        full_task_data = get_task_from_bitrix24(task_id, auth_token)
+        sys.stderr.write(f"   Auth data available: {list(auth_data.keys())}\n")
+        full_task_data = get_task_from_bitrix24(task_id, auth_data)
         
         if not full_task_data:
             sys.stderr.write(f"⚠️ Could not fetch task {task_id} from Bitrix24\n")
