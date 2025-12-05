@@ -177,7 +177,11 @@ def get_task_from_bitrix24(task_id: str, auth_data: Dict) -> Optional[Dict]:
 
 
 def is_task_urgent(task_data: Dict) -> bool:
-    """Check if task is urgent based on priority or deadline"""
+    """Check if task is urgent based on priority only
+    
+    Проверяет только приоритет: priority >= 2 (высокий или критический)
+    Дедлайн не учитывается
+    """
     # Check priority (поддерживаем разные форматы)
     priority = (
         task_data.get("PRIORITY") or 
@@ -188,57 +192,14 @@ def is_task_urgent(task_data: Dict) -> bool:
     try:
         priority_int = int(priority) if priority else 0
         if priority_int >= Config.URGENT_PRIORITY_THRESHOLD:
-            if Config.DEBUG:
-                print(
-                    f"🔍 Task is urgent due to priority: {priority_int}"
-                )
+            import sys
+            sys.stderr.write(f"✅ Task is urgent: priority = {priority_int}\n")
             return True
     except (ValueError, TypeError):
         pass
-
-    # Check deadline (поддерживаем разные форматы)
-    deadline = (
-        task_data.get("DEADLINE") or 
-        task_data.get("deadline") or 
-        task_data.get("Deadline") or 
-        ""
-    )
-    if deadline:
-        try:
-            # Try parsing various date formats
-            deadline_dt = None
-            date_formats = [
-                "%Y-%m-%d %H:%M:%S",
-                "%Y-%m-%dT%H:%M:%S",
-                "%Y-%m-%dT%H:%M:%SZ",
-                "%Y-%m-%d",
-                "%d.%m.%Y %H:%M:%S",
-                "%d.%m.%Y"
-            ]
-
-            for fmt in date_formats:
-                try:
-                    deadline_dt = datetime.strptime(str(deadline), fmt)
-                    break
-                except ValueError:
-                    continue
-
-            if deadline_dt:
-                now = datetime.now()
-                time_diff = deadline_dt - now
-                hours_until_deadline = time_diff.total_seconds() / 3600
-
-                if 0 <= hours_until_deadline <= Config.URGENT_DEADLINE_HOURS:
-                    if Config.DEBUG:
-                        print(
-                            f"🔍 Task is urgent due to deadline: "
-                            f"{hours_until_deadline:.1f} hours"
-                        )
-                    return True
-        except Exception as e:
-            if Config.DEBUG:
-                print(f"⚠️ Error parsing deadline '{deadline}': {e}")
-
+    
+    import sys
+    sys.stderr.write(f"⏭️ Task is not urgent: priority = {priority} (< {Config.URGENT_PRIORITY_THRESHOLD})\n")
     return False
 
 
@@ -529,37 +490,37 @@ def webhook_tasks():
             print(f"🔍 Creator ID: {creator_id}")
             print(f"🔍 Responsible ID: {responsible_id}")
         
-        # Filter 1: Check if task is important
+        # Filter 1: Check if task is important (priority >= 2)
         # Use full task data from REST API
         task_fields = full_task_data
         
         sys.stderr.write(f"🔍 Task fields for filtering: {json.dumps(task_fields, indent=2, ensure_ascii=False)}\n")
         
         if not is_task_important(task_fields):
-            msg = "⏭️ Task is not important - skipping"
+            msg = "⏭️ Task is not important (priority < 2) - skipping"
             print(msg)
             sys.stderr.write(f"{msg}\n")
             return jsonify(
-                {"status": "ok", "message": "Task not important"}
+                {"status": "ok", "message": "Task not important (priority < 2)"}
             ), 200
 
-        # Filter 2: Check if creator is a leader
+        # Filter 2: Check if creator is a leader (руководитель отдела или топ-менеджер)
         if not is_leader(creator_id):
-            msg = f"⏭️ Creator {creator_id} is not a leader - skipping"
+            msg = f"⏭️ Creator {creator_id} is not a leader/top manager - skipping"
             print(msg)
             sys.stderr.write(f"{msg}\n")
             return jsonify(
-                {"status": "ok", "message": "Creator not a leader"}
+                {"status": "ok", "message": "Creator not a leader/top manager"}
             ), 200
 
-        # Filter 3: Check if task is urgent
-        # Use task_fields from Filter 1
+        # Filter 3: Check if task is urgent (priority >= 2)
+        # This is the same as Filter 1, but kept for consistency
         if not is_task_urgent(task_fields):
-            msg = "⏭️ Task is not urgent - skipping"
+            msg = "⏭️ Task is not urgent (priority < 2) - skipping"
             print(msg)
             sys.stderr.write(f"{msg}\n")
             return jsonify(
-                {"status": "ok", "message": "Task not urgent"}
+                {"status": "ok", "message": "Task not urgent (priority < 2)"}
             ), 200
 
         # Get Telegram chat ID for responsible user (Исполнитель)
