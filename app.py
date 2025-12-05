@@ -18,26 +18,71 @@ except ValueError as e:
 
 
 def is_task_important(task_data: Dict) -> bool:
-    """Check if task has important status"""
-    # Bitrix24 task status field - check various possible field names
-    status = task_data.get("STATUS", "")
-    important = task_data.get("IMPORTANT", "")
-
-    # Check if status contains "important" or if IMPORTANT field is set
+    """Check if task has important status
+    
+    Проверяет различные варианты полей (верхний/нижний регистр, camelCase)
+    """
+    # Bitrix24 может возвращать поля в разных форматах:
+    # - Верхний регистр: STATUS, IMPORTANT
+    # - camelCase: status, important
+    # - REST API: status, important
+    
+    # Проверяем статус (разные варианты названий)
+    status = (
+        task_data.get("STATUS") or 
+        task_data.get("status") or 
+        task_data.get("Status") or 
+        ""
+    )
+    
+    # Проверяем поле IMPORTANT (разные варианты)
+    important = (
+        task_data.get("IMPORTANT") or 
+        task_data.get("important") or 
+        task_data.get("Important") or 
+        ""
+    )
+    
+    # Проверяем STATUS_ID
+    status_id = (
+        task_data.get("STATUS_ID") or 
+        task_data.get("statusId") or 
+        task_data.get("status_id") or 
+        ""
+    )
+    
+    # Проверка статуса на наличие слова "important" или "важно"
     if isinstance(status, str):
-        if "important" in status.lower() or "важно" in status.lower():
+        status_lower = status.lower()
+        if "important" in status_lower or "важно" in status_lower:
             return True
-
-    if isinstance(important, (str, int, bool)):
+    
+    # Проверка поля IMPORTANT
+    if important:
         important_str = str(important).lower()
-        if important_str in ["1", "true", "yes", "важно", "important"]:
+        if important_str in ["1", "true", "yes", "важно", "important", "y"]:
             return True
-
-    # Also check STATUS_ID if available (common Bitrix24 pattern)
-    status_id = task_data.get("STATUS_ID", "")
-    if str(status_id) in ["2", "3"]:  # Common important status IDs
-        return True
-
+    
+    # Проверка STATUS_ID (статусы 2, 3 часто означают важные задачи)
+    if status_id:
+        if str(status_id) in ["2", "3"]:
+            return True
+    
+    # Если статус = 2 (выполняется) и приоритет высокий - считаем важной
+    if str(status) == "2" or str(status_id) == "2":
+        priority = (
+            task_data.get("PRIORITY") or 
+            task_data.get("priority") or 
+            task_data.get("Priority") or 
+            ""
+        )
+        try:
+            priority_int = int(priority) if priority else 0
+            if priority_int >= 2:  # Высокий или критический приоритет
+                return True
+        except (ValueError, TypeError):
+            pass
+    
     return False
 
 
@@ -227,6 +272,18 @@ def extract_task_data(webhook_data: Dict) -> Optional[Dict]:
         'ts': '...',
         'auth': {...}
     }
+    
+    Или из REST API (tasks.task.get):
+    {
+        'id': '123',
+        'title': '...',
+        'priority': '2',
+        'createdBy': '488',
+        'responsibleId': '488',
+        'creator': {'id': '488', 'name': '...'},
+        'responsible': {'id': '488', 'name': '...'},
+        ...
+    }
     """
     # Get data section
     data_section = webhook_data.get("data", {})
@@ -247,22 +304,57 @@ def extract_task_data(webhook_data: Dict) -> Optional[Dict]:
     if not task or task == "undefined" or (isinstance(task, str) and task.lower() == "undefined"):
         return None
     
-    # Extract task fields (Bitrix24 field names)
-    task_id = task.get("ID", task.get("id", ""))
-    title = task.get("TITLE", task.get("title", ""))
-    priority = task.get("PRIORITY", task.get("priority", ""))
-    deadline = task.get("DEADLINE", task.get("deadline", ""))
-    responsible_id = task.get(
-        "RESPONSIBLE_ID", task.get("responsible_id", "")
+    # Extract task fields (поддерживаем разные форматы: верхний регистр, camelCase)
+    task_id = task.get("ID") or task.get("id") or ""
+    title = task.get("TITLE") or task.get("title") or ""
+    priority = task.get("PRIORITY") or task.get("priority") or ""
+    deadline = task.get("DEADLINE") or task.get("deadline") or ""
+    
+    # Responsible (разные варианты)
+    responsible_id = (
+        task.get("RESPONSIBLE_ID") or 
+        task.get("responsible_id") or 
+        task.get("responsibleId") or 
+        ""
     )
-    responsible_name = task.get(
-        "RESPONSIBLE_NAME", task.get("responsible_name", "")
+    responsible_name = (
+        task.get("RESPONSIBLE_NAME") or 
+        task.get("responsible_name") or 
+        task.get("responsibleName") or 
+        ""
     )
-    creator_id = task.get("CREATED_BY", task.get("created_by", ""))
-    creator_name = task.get(
-        "CREATED_BY_NAME", task.get("created_by_name", "")
+    
+    # Если responsible_name не найден, но есть объект responsible
+    if not responsible_name and "responsible" in task:
+        responsible_obj = task.get("responsible", {})
+        if isinstance(responsible_obj, dict):
+            responsible_name = responsible_obj.get("name", "")
+            if not responsible_id:
+                responsible_id = responsible_obj.get("id", "")
+    
+    # Creator (разные варианты)
+    creator_id = (
+        task.get("CREATED_BY") or 
+        task.get("created_by") or 
+        task.get("createdBy") or 
+        ""
     )
-    status = task.get("STATUS", task.get("status", ""))
+    creator_name = (
+        task.get("CREATED_BY_NAME") or 
+        task.get("created_by_name") or 
+        task.get("createdByName") or 
+        ""
+    )
+    
+    # Если creator_name не найден, но есть объект creator
+    if not creator_name and "creator" in task:
+        creator_obj = task.get("creator", {})
+        if isinstance(creator_obj, dict):
+            creator_name = creator_obj.get("name", "")
+            if not creator_id:
+                creator_id = creator_obj.get("id", "")
+    
+    status = task.get("STATUS") or task.get("status") or ""
     
     # Build task link (assuming standard Bitrix24 URL structure)
     bitrix24_domain = Config.BITRIX24_DOMAIN
