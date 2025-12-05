@@ -97,11 +97,42 @@ def is_task_urgent(task_data: Dict) -> bool:
 
 
 def extract_task_data(webhook_data: Dict) -> Optional[Dict]:
-    """Extract and normalize task data from Bitrix24 webhook"""
-    # Bitrix24 webhook structure: data contains the task object
-    task = webhook_data.get("data", {})
+    """Extract and normalize task data from Bitrix24 webhook
     
-    if not task:
+    Bitrix24 sends data in format:
+    {
+        'event': 'OnTaskAdd' or 'OnTaskUpdate',
+        'data': {
+            'FIELDS_BEFORE': {...} or undefined,
+            'FIELDS_AFTER': {
+                'ID': 123,
+                'TITLE': '...',
+                'PRIORITY': '2',
+                ...
+            },
+            ...
+        },
+        'ts': '...',
+        'auth': {...}
+    }
+    """
+    # Get data section
+    data_section = webhook_data.get("data", {})
+    
+    if not data_section:
+        return None
+    
+    # Bitrix24 sends task fields in FIELDS_AFTER
+    # FIELDS_BEFORE may be undefined for OnTaskAdd
+    task = data_section.get("FIELDS_AFTER")
+    
+    # Fallback: if FIELDS_AFTER is not present, try direct data structure
+    # (for backward compatibility or different event types)
+    if not task or task == "undefined":
+        task = data_section
+    
+    # If still no task data, return None
+    if not task or task == "undefined" or (isinstance(task, str) and task.lower() == "undefined"):
         return None
     
     # Extract task fields (Bitrix24 field names)
@@ -244,7 +275,13 @@ def webhook_tasks():
             print(f"🔍 Responsible ID: {responsible_id}")
         
         # Filter 1: Check if task is important
-        if not is_task_important(webhook_data.get("data", {})):
+        # Get task data from FIELDS_AFTER
+        task_fields = webhook_data.get("data", {}).get("FIELDS_AFTER", {})
+        if not task_fields or task_fields == "undefined":
+            # Fallback to direct data structure
+            task_fields = webhook_data.get("data", {})
+        
+        if not is_task_important(task_fields):
             if Config.DEBUG:
                 print("⏭️ Task is not important - skipping")
             return jsonify(
@@ -262,7 +299,8 @@ def webhook_tasks():
             ), 200
 
         # Filter 3: Check if task is urgent
-        if not is_task_urgent(webhook_data.get("data", {})):
+        # Use task_fields from Filter 1
+        if not is_task_urgent(task_fields):
             if Config.DEBUG:
                 print("⏭️ Task is not urgent - skipping")
             return jsonify(
