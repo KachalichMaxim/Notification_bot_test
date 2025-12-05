@@ -77,8 +77,20 @@ def send_task_notification(
     creator = escape_html(creator_name)
     link = task_data.get('link', '#')
     
-    # Build message in required format
-    message = f"""{urgent_emoji} <b>Срочная задача</b>
+    # Different message format for new vs updated tasks
+    if event_type == "new":
+        # Build message for new task
+        message = f"""{urgent_emoji} <b>Срочная задача</b>
+
+От: {creator}
+
+Наименование задачи: <b>{title}</b>
+
+Детальная информация по ссылке: <a href=\"{link}\">Открыть задачу</a>
+"""
+    else:
+        # Build message for updated task
+        message = f"""{urgent_emoji} По срочной задаче поступило обновление
 
 От: {creator}
 
