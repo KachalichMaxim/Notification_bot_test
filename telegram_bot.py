@@ -67,14 +67,24 @@ def send_task_notification(
     # Get creator name (first and last name)
     creator_name = task_data.get("creator_name", task_data.get("creator_id", "Неизвестен"))
     
+    # Escape HTML special characters in text
+    def escape_html(text):
+        if not text:
+            return ""
+        return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    
+    title = escape_html(task_data.get('title', 'Без названия'))
+    creator = escape_html(creator_name)
+    link = task_data.get('link', '#')
+    
     # Build message in required format
     message = f"""{urgent_emoji} <b>Срочная задача</b>
 
-От: {creator_name}
+От: {creator}
 
-Наименование задачи: <b>{task_data.get('title', 'Без названия')}</b>
+Наименование задачи: <b>{title}</b>
 
-Детальная информация по ссылке: <a href="{task_data.get('link', '#')}">Открыть задачу</a>
+Детальная информация по ссылке: <a href=\"{link}\">Открыть задачу</a>
 """
     
     # Send message via Telegram Bot API
@@ -105,5 +115,13 @@ def send_task_notification(
 
     except requests.exceptions.RequestException as e:
         print(f"❌ Error sending Telegram notification: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_data = e.response.json()
+                error_desc = error_data.get('description', 'Unknown error')
+                print(f"   Telegram API error: {error_desc}")
+                print(f"   Full response: {error_data}")
+            except:
+                print(f"   Response text: {e.response.text[:200]}")
         return False
 
