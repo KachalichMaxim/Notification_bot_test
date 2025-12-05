@@ -42,17 +42,17 @@ def is_task_important(task_data: Dict) -> bool:
 
 
 def get_task_from_bitrix24(task_id: str, auth_token: str) -> Optional[Dict]:
-    """Get full task data from Bitrix24 REST API"""
+    """Get full task data from Bitrix24 REST API
+    
+    Использует метод tasks.task.get для получения полных данных задачи
+    """
     if not task_id or not auth_token:
         return None
     
-    # Формируем URL для REST API
-    # Используем входящий webhook токен для получения данных
-    # Формат: https://domain/rest/USER_ID/TOKEN/tasks.task.get
-    # Но у нас есть только исходящий токен, попробуем другой формат
-    
-    # Альтернатива: используем исходящий токен напрямую
     domain = Config.BITRIX24_DOMAIN.replace("https://", "").replace("http://", "")
+    
+    # Исходящий webhook токен можно использовать для REST API
+    # Формат: https://domain/rest/tasks.task.get?auth=TOKEN
     rest_url = f"https://{domain}/rest/tasks.task.get"
     
     params = {
@@ -70,13 +70,34 @@ def get_task_from_bitrix24(task_id: str, auth_token: str) -> Optional[Dict]:
         response.raise_for_status()
         result = response.json()
         
+        # Проверяем наличие ошибки
+        if result.get("error"):
+            import sys
+            sys.stderr.write(f"❌ Bitrix24 API error: {result.get('error_description', result.get('error'))}\n")
+            # Если исходящий токен не работает, попробуем входящий из конфига
+            if Config.BITRIX24_AUTH_TOKEN and Config.BITRIX24_AUTH_TOKEN != auth_token:
+                sys.stderr.write(f"🔄 Trying with config token...\n")
+                params["auth"] = Config.BITRIX24_AUTH_TOKEN
+                response = requests.get(rest_url, params=params, timeout=10)
+                response.raise_for_status()
+                result = response.json()
+        
         if result.get("result") and result["result"].get("task"):
             return result["result"]["task"]
+        
+        import sys
+        sys.stderr.write(f"⚠️ No task data in response: {json.dumps(result, indent=2, ensure_ascii=False)}\n")
         return None
     except Exception as e:
         print(f"❌ Error fetching task from Bitrix24: {e}")
         import sys
         sys.stderr.write(f"❌ Error fetching task {task_id} from Bitrix24: {e}\n")
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_data = e.response.json()
+                sys.stderr.write(f"   Response: {json.dumps(error_data, indent=2, ensure_ascii=False)}\n")
+            except:
+                sys.stderr.write(f"   Response text: {e.response.text[:200]}\n")
         return None
 
 
