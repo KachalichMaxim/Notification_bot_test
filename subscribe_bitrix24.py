@@ -23,20 +23,38 @@ REST_ENDPOINT = f'https://{BITRIX24_DOMAIN}/rest/event.bind.json'
 
 
 def send_request(event_name, handler_url):
-    """Отправить запрос на подписку события"""
+    """Отправить запрос на подписку события (POST с JSON)"""
     data = {
         'auth': AUTH_TOKEN,
         'event': event_name,
         'handler': handler_url
     }
     
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+    
     try:
-        response = requests.get(REST_ENDPOINT, params=data, timeout=10)
+        # Используем POST с JSON телом, как указано в документации
+        response = requests.post(
+            REST_ENDPOINT,
+            json=data,
+            headers=headers,
+            timeout=10
+        )
         response.raise_for_status()
         result = response.json()
         return result
     except requests.exceptions.RequestException as e:
         print(f"❌ Ошибка при отправке запроса: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_data = e.response.json()
+                print(f"   Ответ сервера: {json.dumps(error_data, indent=2, ensure_ascii=False)}")
+            except:
+                print(f"   HTTP Status: {e.response.status_code}")
+                print(f"   Response: {e.response.text[:200]}")
         return None
 
 
