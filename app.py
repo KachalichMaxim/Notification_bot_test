@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, Optional
 from config import Config
 from telegram_bot import send_task_notification
-from user_mapping import is_leader, get_telegram_chat_id
+from user_mapping import is_leader, get_subscribers
 
 app = Flask(__name__)
 

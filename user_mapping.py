@@ -106,3 +106,12 @@ def get_all_leaders() -> List[str]:
     mappings = _load_mappings()
     return [str(leader) for leader in mappings.get("leaders", [])]
 
+
+def get_subscribers() -> List[str]:
+    """Get list of Telegram chat IDs for subscribers (people who subscribed to bot)"""
+    mappings = _load_mappings()
+    subscribers = mappings.get("subscribers", [])
+    if not isinstance(subscribers, list):
+        return []
+    return [str(chat_id) for chat_id in subscribers if chat_id]
+
