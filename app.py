@@ -63,6 +63,20 @@ def is_task_important(task_data: Dict) -> bool:
         if important_str in ["1", "true", "yes", "важно", "important", "y"]:
             return True
     
+    # Проверка поля isImportant (из REST API)
+    is_important = (
+        task_data.get("isImportant") or 
+        task_data.get("IS_IMPORTANT") or 
+        task_data.get("is_important") or 
+        ""
+    )
+    if is_important:
+        if isinstance(is_important, bool) and is_important:
+            return True
+        important_str = str(is_important).lower()
+        if important_str in ["1", "true", "yes", "важно", "important", "y"]:
+            return True
+    
     # Проверка STATUS_ID (статусы 2, 3 часто означают важные задачи)
     if status_id:
         if str(status_id) in ["2", "3"]:
@@ -143,7 +157,7 @@ def get_task_from_bitrix24(task_id: str, auth_data: Dict) -> Optional[Dict]:
     select_fields = [
         "ID", "TITLE", "DESCRIPTION", "STATUS", "subStatus",
         "DEADLINE", "CREATED_DATE", "CREATED_BY", "RESPONSIBLE_ID",
-        "PRIORITY", "MARK", "IMPORTANT"
+        "PRIORITY", "MARK", "IMPORTANT", "isImportant", "favorite"
     ]
     
     # Пробуем каждый метод авторизации
