@@ -597,14 +597,18 @@ def webhook_tasks():
                 {"status": "ok", "message": "Task not urgent"}
             ), 200
 
-        # Get Telegram chat ID for responsible user
+        # Get Telegram chat ID for responsible user (Исполнитель)
+        # Уведомления отправляются ТОЛЬКО исполнителю задачи, а не всем
+        sys.stderr.write(
+            f"📤 Sending notification to RESPONSIBLE user (Исполнитель): {responsible_id}\n"
+        )
         telegram_chat_id = get_telegram_chat_id(responsible_id)
         if not telegram_chat_id:
-            print(
-                f"⚠️ No Telegram mapping found for user {responsible_id}"
-            )
+            msg = f"⚠️ No Telegram mapping found for responsible user {responsible_id}"
+            print(msg)
+            sys.stderr.write(f"{msg}\n")
             return jsonify(
-                {"status": "ok", "message": "No Telegram mapping"}
+                {"status": "ok", "message": "No Telegram mapping for responsible user"}
             ), 200
         
         # Determine event type (OnTaskAdd or OnTaskUpdate)
