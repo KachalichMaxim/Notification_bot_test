@@ -153,32 +153,80 @@ def extract_task_data(webhook_data: Dict) -> Optional[Dict]:
     }
 
 
-@app.route("/webhook_tasks", methods=["POST"])
+@app.route("/webhook_tasks", methods=["POST", "GET"])
 def webhook_tasks():
     """Handle Bitrix24 webhook events for tasks"""
     try:
-        # Get raw data for debugging
-        raw_data = request.get_data(as_text=True)
-        
-        if Config.DEBUG:
-            print(f"\n{'='*60}")
-            print(f"📥 Received webhook at {datetime.now()}")
-            print(f"{'='*60}")
-            print(f"Headers: {dict(request.headers)}")
-            print(f"Raw data: {raw_data}")
-        
-        # Parse JSON
-        try:
-            webhook_data = json.loads(raw_data)
-        except json.JSONDecodeError as e:
-            print(f"❌ Invalid JSON: {e}")
-            return jsonify({"error": "Invalid JSON"}), 400
+        # Bitrix24 может отправлять данные как POST JSON или GET параметры
+        if request.method == "GET":
+            # Данные в GET параметрах (для некоторых типов событий)
+            webhook_data = dict(request.args)
+            if Config.DEBUG:
+                print(f"\n{'='*60}")
+                print(f"📥 Received GET webhook at {datetime.now()}")
+                print(f"{'='*60}")
+                print(f"GET params: {webhook_data}")
+        else:
+            # Данные в POST теле
+            raw_data = request.get_data(as_text=True)
+            
+            if Config.DEBUG:
+                print(f"\n{'='*60}")
+                print(f"📥 Received POST webhook at {datetime.now()}")
+                print(f"{'='*60}")
+                print(f"Headers: {dict(request.headers)}")
+                print(f"Content-Type: {request.content_type}")
+                print(f"Raw data: {raw_data[:500]}...")  # Первые 500 символов
+            
+            # Пробуем разные форматы
+            webhook_data = None
+            
+            # Вариант 1: JSON в теле запроса
+            if request.is_json:
+                webhook_data = request.get_json()
+                if Config.DEBUG:
+                    print("✅ Parsed as JSON from request.get_json()")
+            else:
+                # Вариант 2: JSON строка в raw_data
+                if raw_data:
+                    try:
+                        webhook_data = json.loads(raw_data)
+                        if Config.DEBUG:
+                            print("✅ Parsed as JSON from raw_data")
+                    except json.JSONDecodeError:
+                        # Вариант 3: Форма-данные (form-data)
+                        if request.form:
+                            webhook_data = dict(request.form)
+                            if Config.DEBUG:
+                                print("✅ Parsed as form-data")
+                        else:
+                            # Вариант 4: Попробуем как query string в теле
+                            try:
+                                from urllib.parse import parse_qs
+                                parsed = parse_qs(raw_data)
+                                webhook_data = {k: v[0] if len(v) == 1 else v 
+                                               for k, v in parsed.items()}
+                                if Config.DEBUG:
+                                    print("✅ Parsed as query string")
+                            except Exception:
+                                pass
+            
+            if webhook_data is None:
+                print(f"❌ Could not parse request data")
+                print(f"   Raw data: {raw_data[:200]}")
+                return jsonify({"error": "Could not parse request data"}), 400
         
         if Config.DEBUG:
             parsed_json = json.dumps(
                 webhook_data, indent=2, ensure_ascii=False
             )
             print(f"Parsed data: {parsed_json}")
+            # Логируем в файл для отладки
+            import sys
+            sys.stderr.write(f"\n{'='*60}\n")
+            sys.stderr.write(f"📥 Webhook data at {datetime.now()}\n")
+            sys.stderr.write(f"{parsed_json}\n")
+            sys.stderr.write(f"{'='*60}\n")
         
         # Extract task data
         task_data = extract_task_data(webhook_data)
