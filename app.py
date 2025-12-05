@@ -1,6 +1,7 @@
 """Main Flask application for Bitrix24 webhook"""
 from flask import Flask, request, jsonify
 import json
+import requests
 from datetime import datetime
 from typing import Dict, Optional
 from config import Config
@@ -38,6 +39,45 @@ def is_task_important(task_data: Dict) -> bool:
         return True
 
     return False
+
+
+def get_task_from_bitrix24(task_id: str, auth_token: str) -> Optional[Dict]:
+    """Get full task data from Bitrix24 REST API"""
+    if not task_id or not auth_token:
+        return None
+    
+    # Формируем URL для REST API
+    # Используем входящий webhook токен для получения данных
+    # Формат: https://domain/rest/USER_ID/TOKEN/tasks.task.get
+    # Но у нас есть только исходящий токен, попробуем другой формат
+    
+    # Альтернатива: используем исходящий токен напрямую
+    domain = Config.BITRIX24_DOMAIN.replace("https://", "").replace("http://", "")
+    rest_url = f"https://{domain}/rest/tasks.task.get"
+    
+    params = {
+        "auth": auth_token,
+        "taskId": task_id,
+        "select": [
+            "ID", "TITLE", "DESCRIPTION", "STATUS", "subStatus",
+            "DEADLINE", "CREATED_DATE", "RESPONSIBLE_ID", "CREATED_BY",
+            "PRIORITY", "MARK", "IMPORTANT"
+        ]
+    }
+    
+    try:
+        response = requests.get(rest_url, params=params, timeout=10)
+        response.raise_for_status()
+        result = response.json()
+        
+        if result.get("result") and result["result"].get("task"):
+            return result["result"]["task"]
+        return None
+    except Exception as e:
+        print(f"❌ Error fetching task from Bitrix24: {e}")
+        import sys
+        sys.stderr.write(f"❌ Error fetching task {task_id} from Bitrix24: {e}\n")
+        return None
 
 
 def is_task_urgent(task_data: Dict) -> bool:
@@ -288,20 +328,44 @@ def webhook_tasks():
             sys.stderr.write(f"{parsed_json}\n")
             sys.stderr.write(f"{'='*60}\n")
         
-        # Extract task data
-        task_data = extract_task_data(webhook_data)
-        if not task_data:
-            print("⚠️ No task data found in webhook")
-            import sys
-            sys.stderr.write("⚠️ No task data found in webhook\n")
-            return jsonify({"status": "ok", "message": "No task data"}), 200
+        # Extract task ID from webhook
+        task_fields_after = webhook_data.get("data", {}).get("FIELDS_AFTER", {})
+        if not task_fields_after or task_fields_after == "undefined":
+            task_fields_after = webhook_data.get("data", {})
         
-        task_id = task_data.get("id")
+        task_id = task_fields_after.get("ID", task_fields_after.get("id", ""))
+        
+        if not task_id:
+            print("⚠️ No task ID found in webhook")
+            import sys
+            sys.stderr.write("⚠️ No task ID found in webhook\n")
+            return jsonify({"status": "ok", "message": "No task ID"}), 200
+        
+        # Get auth token from webhook
+        auth_data = webhook_data.get("auth", {})
+        auth_token = auth_data.get("application_token", Config.BITRIX24_AUTH_TOKEN)
+        
+        # Get full task data from Bitrix24 REST API
+        import sys
+        sys.stderr.write(f"\n🔍 Fetching task {task_id} from Bitrix24...\n")
+        full_task_data = get_task_from_bitrix24(task_id, auth_token)
+        
+        if not full_task_data:
+            sys.stderr.write(f"⚠️ Could not fetch task {task_id} from Bitrix24\n")
+            return jsonify({"status": "ok", "message": "Could not fetch task data"}), 200
+        
+        sys.stderr.write(f"✅ Task data fetched: {json.dumps(full_task_data, indent=2, ensure_ascii=False)}\n")
+        
+        # Extract task data for processing
+        task_data = extract_task_data({"data": {"FIELDS_AFTER": full_task_data}})
+        if not task_data:
+            sys.stderr.write("⚠️ Could not extract task data\n")
+            return jsonify({"status": "ok", "message": "Could not extract task data"}), 200
+        
         creator_id = task_data.get("creator_id")
         responsible_id = task_data.get("responsible_id")
         
         # Логируем в stderr для отладки
-        import sys
         sys.stderr.write(f"\n🔍 Task ID: {task_id}\n")
         sys.stderr.write(f"🔍 Creator ID: {creator_id}\n")
         sys.stderr.write(f"🔍 Responsible ID: {responsible_id}\n")
@@ -313,11 +377,8 @@ def webhook_tasks():
             print(f"🔍 Responsible ID: {responsible_id}")
         
         # Filter 1: Check if task is important
-        # Get task data from FIELDS_AFTER
-        task_fields = webhook_data.get("data", {}).get("FIELDS_AFTER", {})
-        if not task_fields or task_fields == "undefined":
-            # Fallback to direct data structure
-            task_fields = webhook_data.get("data", {})
+        # Use full task data from REST API
+        task_fields = full_task_data
         
         sys.stderr.write(f"🔍 Task fields for filtering: {json.dumps(task_fields, indent=2, ensure_ascii=False)}\n")
         
