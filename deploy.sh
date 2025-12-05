@@ -255,23 +255,84 @@ run_service() {
     
     source "${VENV_DIR}/bin/activate"
     
-    # Получаем порт из .env
+    # Получаем порты из .env
     if [ -f "$ENV_FILE" ]; then
-        PORT=$(grep "^PORT=" "$ENV_FILE" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
-        PORT=${PORT:-8080}
+        EXTERNAL_PORT=$(grep "^PORT=" "$ENV_FILE" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+        EXTERNAL_PORT=${EXTERNAL_PORT:-8081}
     else
-        PORT=8080
+        EXTERNAL_PORT=8081
     fi
     
-    check_port "$PORT"
+    # Внутренний порт для gunicorn
+    INTERNAL_PORT=$((EXTERNAL_PORT + 1))
     
-    print_info "Сервис запускается на порту $PORT"
+    check_port "$INTERNAL_PORT"
+    
+    print_info "Gunicorn запускается на внутреннем порту $INTERNAL_PORT"
+    print_info "Внешний порт (nginx): $EXTERNAL_PORT"
     print_info "Для остановки нажмите Ctrl+C"
     print_info "Логи будут выводиться в консоль"
     echo
     
     cd "$SCRIPT_DIR"
-    python app.py
+    gunicorn --workers 3 --bind 127.0.0.1:${INTERNAL_PORT} --access-logfile access.log --error-logfile error.log --log-level info app:app
+}
+
+# Настройка nginx
+setup_nginx() {
+    print_info "Настройка nginx reverse proxy..."
+    
+    check_root "install-service"
+    
+    # Получаем порты из .env
+    if [ -f "$ENV_FILE" ]; then
+        EXTERNAL_PORT=$(grep "^PORT=" "$ENV_FILE" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+        EXTERNAL_PORT=${EXTERNAL_PORT:-8081}
+    else
+        EXTERNAL_PORT=8081
+    fi
+    
+    # Внутренний порт для gunicorn (всегда на 1 больше внешнего)
+    INTERNAL_PORT=$((EXTERNAL_PORT + 1))
+    
+    NGINX_CONFIG="/etc/nginx/sites-available/${SERVICE_NAME}"
+    NGINX_ENABLED="/etc/nginx/sites-enabled/${SERVICE_NAME}"
+    
+    # Проверка наличия nginx
+    if ! command -v nginx &> /dev/null; then
+        print_warning "Nginx не установлен. Пропуск настройки nginx."
+        print_info "Установите nginx: sudo apt-get install nginx"
+        return 1
+    fi
+    
+    # Создание конфигурации nginx
+    cat > "$NGINX_CONFIG" << EOF
+server {
+    listen ${EXTERNAL_PORT};
+    server_name bookntrack.online www.bookntrack.online;
+
+    location / {
+        proxy_pass http://127.0.0.1:${INTERNAL_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    
+    # Создание симлинка
+    ln -sf "$NGINX_CONFIG" "$NGINX_ENABLED"
+    
+    # Проверка конфигурации
+    if nginx -t > /dev/null 2>&1; then
+        systemctl reload nginx
+        print_success "Nginx настроен: ${EXTERNAL_PORT} -> 127.0.0.1:${INTERNAL_PORT}"
+    else
+        print_error "Ошибка в конфигурации nginx!"
+        nginx -t
+        return 1
+    fi
 }
 
 # Создание systemd service файла
@@ -280,13 +341,16 @@ create_systemd_service() {
     
     check_root "install-service"
     
-    # Получаем порт из .env
+    # Получаем порты из .env
     if [ -f "$ENV_FILE" ]; then
-        PORT=$(grep "^PORT=" "$ENV_FILE" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
-        PORT=${PORT:-8080}
+        EXTERNAL_PORT=$(grep "^PORT=" "$ENV_FILE" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+        EXTERNAL_PORT=${EXTERNAL_PORT:-8081}
     else
-        PORT=8080
+        EXTERNAL_PORT=8081
     fi
+    
+    # Внутренний порт для gunicorn
+    INTERNAL_PORT=$((EXTERNAL_PORT + 1))
     
     # Получаем пользователя
     SERVICE_USER=${SUDO_USER:-$USER}
@@ -304,11 +368,11 @@ Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${SCRIPT_DIR}
 Environment="PATH=${VENV_DIR}/bin"
-ExecStart=${VENV_DIR}/bin/python ${SCRIPT_DIR}/app.py
+ExecStart=${VENV_DIR}/bin/gunicorn --workers 3 --bind 127.0.0.1:${INTERNAL_PORT} --access-logfile ${SCRIPT_DIR}/access.log --error-logfile ${SCRIPT_DIR}/error.log --log-level info app:app
 Restart=always
 RestartSec=10
-StandardOutput=journal
-StandardError=journal
+StandardOutput=append:${SCRIPT_DIR}/gunicorn.log
+StandardError=append:${SCRIPT_DIR}/gunicorn.log
 
 [Install]
 WantedBy=multi-user.target
@@ -316,6 +380,8 @@ EOF
     
     systemctl daemon-reload
     print_success "Systemd service файл создан: $SERVICE_FILE"
+    print_info "Gunicorn будет запущен на внутреннем порту: ${INTERNAL_PORT}"
+    print_info "Nginx будет проксировать внешний порт: ${EXTERNAL_PORT}"
     print_info "Для управления сервисом используйте:"
     print_info "  sudo systemctl start ${SERVICE_NAME}"
     print_info "  sudo systemctl stop ${SERVICE_NAME}"
@@ -433,7 +499,11 @@ main() {
                 print_info "Запустите сначала: $0 install"
                 exit 1
             fi
+            setup_nginx
             create_systemd_service
+            print_success "=== Сервис установлен! ==="
+            print_info "Запустите сервис: sudo systemctl start ${SERVICE_NAME}"
+            print_info "Включите автозапуск: sudo systemctl enable ${SERVICE_NAME}"
             ;;
         status)
             show_status
