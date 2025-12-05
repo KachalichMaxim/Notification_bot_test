@@ -225,21 +225,50 @@ def webhook_tasks():
                         if Config.DEBUG:
                             print("✅ Parsed as JSON from raw_data")
                     except json.JSONDecodeError:
-                        # Вариант 3: Форма-данные (form-data)
+                        # Вариант 3: Форма-данные (form-data) или query string
+                        # Bitrix24 отправляет данные как form-data с вложенными ключами
+                        # например: data[FIELDS_AFTER][ID] = "12672"
                         if request.form:
-                            webhook_data = dict(request.form)
+                            # Преобразуем плоскую структуру form-data в вложенную
+                            webhook_data = {}
+                            for key, value in request.form.items():
+                                # Обрабатываем вложенные ключи типа data[FIELDS_AFTER][ID]
+                                keys = key.replace(']', '').split('[')
+                                current = webhook_data
+                                for i, k in enumerate(keys):
+                                    if i == len(keys) - 1:
+                                        # Последний ключ - значение
+                                        current[k] = value
+                                    else:
+                                        # Промежуточные ключи - словари
+                                        if k not in current:
+                                            current[k] = {}
+                                        current = current[k]
                             if Config.DEBUG:
-                                print("✅ Parsed as form-data")
+                                print("✅ Parsed as form-data with nested keys")
                         else:
                             # Вариант 4: Попробуем как query string в теле
                             try:
-                                from urllib.parse import parse_qs
+                                from urllib.parse import parse_qs, unquote
                                 parsed = parse_qs(raw_data)
-                                webhook_data = {k: v[0] if len(v) == 1 else v 
-                                               for k, v in parsed.items()}
+                                webhook_data = {}
+                                for key, value_list in parsed.items():
+                                    value = value_list[0] if value_list else ""
+                                    # Обрабатываем вложенные ключи
+                                    keys = key.replace(']', '').split('[')
+                                    current = webhook_data
+                                    for i, k in enumerate(keys):
+                                        if i == len(keys) - 1:
+                                            current[k] = unquote(value) if value else ""
+                                        else:
+                                            if k not in current:
+                                                current[k] = {}
+                                            current = current[k]
                                 if Config.DEBUG:
-                                    print("✅ Parsed as query string")
-                            except Exception:
+                                    print("✅ Parsed as query string with nested keys")
+                            except Exception as e:
+                                if Config.DEBUG:
+                                    print(f"❌ Failed to parse as query string: {e}")
                                 pass
             
             if webhook_data is None:
