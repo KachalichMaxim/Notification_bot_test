@@ -23,6 +23,13 @@ MAPPINGS_FILE="${SCRIPT_DIR}/user_mappings.json"
 SERVICE_NAME="bitrix24-webhook"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
+# Проверка интерактивности терминала
+if [ -t 0 ]; then
+    INTERACTIVE=1
+else
+    INTERACTIVE=0
+fi
+
 # Функции для вывода
 print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -81,12 +88,16 @@ create_venv() {
     
     if [ -d "$VENV_DIR" ]; then
         print_warning "Виртуальное окружение уже существует"
-        read -p "Пересоздать? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            rm -rf "$VENV_DIR"
-            $PYTHON_CMD -m venv "$VENV_DIR"
-            print_success "Виртуальное окружение пересоздано"
+        if [ $INTERACTIVE -eq 1 ]; then
+            read -p "Пересоздать? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                rm -rf "$VENV_DIR"
+                $PYTHON_CMD -m venv "$VENV_DIR"
+                print_success "Виртуальное окружение пересоздано"
+            fi
+        else
+            print_info "Пропуск пересоздания (неинтерактивный режим)"
         fi
     else
         $PYTHON_CMD -m venv "$VENV_DIR"
@@ -116,10 +127,15 @@ setup_env() {
     
     if [ -f "$ENV_FILE" ]; then
         print_warning "Файл .env уже существует"
-        read -p "Перезаписать? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Пропуск настройки .env"
+        if [ $INTERACTIVE -eq 1 ]; then
+            read -p "Перезаписать? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                print_info "Пропуск настройки .env"
+                return
+            fi
+        else
+            print_info "Пропуск перезаписи .env (неинтерактивный режим, файл уже существует)"
             return
         fi
     fi
@@ -132,43 +148,47 @@ setup_env() {
     cp "$ENV_EXAMPLE" "$ENV_FILE"
     print_success "Файл .env создан из шаблона"
     
-    # Интерактивная настройка
-    print_info "Настройка параметров .env..."
-    
-    read -p "Введите Telegram Bot Token (от @BotFather): " TELEGRAM_TOKEN
-    if [ -n "$TELEGRAM_TOKEN" ]; then
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            # macOS
-            sed -i '' "s|TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}|" "$ENV_FILE"
-        else
-            # Linux
-            sed -i "s|TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}|" "$ENV_FILE"
+    # Интерактивная настройка (только если терминал интерактивный)
+    if [ $INTERACTIVE -eq 1 ]; then
+        print_info "Настройка параметров .env..."
+        
+        read -p "Введите Telegram Bot Token (от @BotFather): " TELEGRAM_TOKEN
+        if [ -n "$TELEGRAM_TOKEN" ]; then
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                # macOS
+                sed -i '' "s|TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}|" "$ENV_FILE"
+            else
+                # Linux
+                sed -i "s|TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}|" "$ENV_FILE"
+            fi
         fi
-    fi
-    
-    read -p "Введите порт для сервера [8080]: " PORT
-    PORT=${PORT:-8080}
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s|PORT=.*|PORT=${PORT}|" "$ENV_FILE"
+        
+        read -p "Введите порт для сервера [8080]: " PORT
+        PORT=${PORT:-8080}
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s|PORT=.*|PORT=${PORT}|" "$ENV_FILE"
+        else
+            sed -i "s|PORT=.*|PORT=${PORT}|" "$ENV_FILE"
+        fi
+        
+        read -p "Включить режим отладки? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            DEBUG_VAL="true"
+        else
+            DEBUG_VAL="false"
+        fi
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s|DEBUG=.*|DEBUG=${DEBUG_VAL}|" "$ENV_FILE"
+        else
+            sed -i "s|DEBUG=.*|DEBUG=${DEBUG_VAL}|" "$ENV_FILE"
+        fi
+        
+        print_success "Файл .env настроен"
     else
-        sed -i "s|PORT=.*|PORT=${PORT}|" "$ENV_FILE"
+        print_info "Пропуск интерактивной настройки .env (неинтерактивный режим)"
+        print_warning "Проверьте параметры в файле .env при необходимости"
     fi
-    
-    read -p "Включить режим отладки? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        DEBUG_VAL="true"
-    else
-        DEBUG_VAL="false"
-    fi
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s|DEBUG=.*|DEBUG=${DEBUG_VAL}|" "$ENV_FILE"
-    else
-        sed -i "s|DEBUG=.*|DEBUG=${DEBUG_VAL}|" "$ENV_FILE"
-    fi
-    
-    print_success "Файл .env настроен"
-    print_warning "Проверьте остальные параметры в файле .env при необходимости"
 }
 
 # Настройка user_mappings.json
@@ -177,10 +197,15 @@ setup_mappings() {
     
     if [ -f "$MAPPINGS_FILE" ]; then
         print_warning "Файл user_mappings.json уже существует"
-        read -p "Перезаписать? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Пропуск настройки user_mappings.json"
+        if [ $INTERACTIVE -eq 1 ]; then
+            read -p "Перезаписать? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                print_info "Пропуск настройки user_mappings.json"
+                return
+            fi
+        else
+            print_info "Пропуск перезаписи user_mappings.json (неинтерактивный режим, файл уже существует)"
             return
         fi
     fi
