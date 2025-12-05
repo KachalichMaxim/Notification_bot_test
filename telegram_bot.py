@@ -62,7 +62,7 @@ def send_task_notification(
 
     # Format message according to requirements
     # Срочная задача (red ! sign emoji)
-    urgent_emoji = "🔴"
+    urgent_emoji = "❗"
     
     # Get creator name (first and last name)
     creator_name = task_data.get("creator_name", task_data.get("creator_id", "Неизвестен"))
@@ -82,7 +82,7 @@ def send_task_notification(
         # Build message for new task
         message = f"""{urgent_emoji} <b>Срочная задача</b>
 
-От: {creator}
+👤 Постановщик: {creator}
 
 Наименование задачи: <b>{title}</b>
 
@@ -90,9 +90,9 @@ def send_task_notification(
 """
     else:
         # Build message for updated task
-        message = f"""{urgent_emoji} По срочной задаче поступило обновление
+        message = f"""{urgent_emoji} <b>По срочной задаче поступило обновление</b>
 
-От: {creator}
+👤 Постановщик: {creator}
 
 Наименование задачи: <b>{title}</b>
 
